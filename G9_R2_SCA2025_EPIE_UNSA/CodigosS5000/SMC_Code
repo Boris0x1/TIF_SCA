@@ -1,0 +1,87 @@
+// =====================================================================
+// CONTROL POR MODOS DESLIZANTES - 1 TANQUE FACTORY IO (SP FIJO = 1.2 m)
+// =====================================================================
+
+// ===== 1) Escalado de IO =====
+
+// Nivel medido 0–10 V -> metros 0–hmax
+h := (FLOAT_IN_1 / 10.0) * hmax;
+
+// ===== Set point FIJO =====
+// href_m ya viene de las variables globales con valor inicial 1.2 [m]
+xd := href_m;
+IF xd < 0.0 THEN
+    xd := 0.0;
+END_IF;
+
+// ===== 2) Parámetros del tanque (modelo) =====
+a := Qinmax / (10.0 * Atank);
+b := (Qoutmax * Vout) / (10.0 * Atank * SQRT(hmax));
+
+// ===== 3) Protecciones numéricas =====
+x := h;
+IF x < epsh THEN
+    x := epsh;
+END_IF;
+
+// ===== 4) Dinámica nominal xdot = -b*sqrt(x) + a*Vin =====
+xdot := -b * SQRT(x) + a * Vin;
+
+// Derivadas de la referencia (escalón): 0
+xdot_d  := 0.0;
+xddot_d := 0.0;
+
+// ===== 5) Superficie deslizante: s = e_dot + lambda*e =====
+e       := x - xd;
+s_slide := xdot - xdot_d + lambda * e;
+
+// ===== 6) f(x, xdot) estimada =====
+den := 2.0 * SQRT(x);
+IF den < EPS_DEN THEN
+    den := EPS_DEN;
+END_IF;
+
+f_hat := -(b / den) * xdot;
+
+// ===== 7) Control equivalente =====
+v_eq := -f_hat + xddot_d - lambda * (xdot - xdot_d);
+
+// ===== 8) Cota F y ganancia k_smc =====
+bF   := 0.1 * b;
+F    := (bF / den) * ABS(xdot);
+k_smc := F + eta;
+
+// ===== 9) Función sat(s/phi) =====
+IF s_slide > phi THEN
+    sat_s := 1.0;
+ELSIF s_slide < -phi THEN
+    sat_s := -1.0;
+ELSE
+    sat_s := s_slide / phi;
+END_IF;
+
+// ===== 10) Ley de control =====
+v := v_eq - k_smc * sat_s;
+
+IF a <> 0.0 THEN
+    u := v / a;
+ELSE
+    u := 0.0;
+END_IF;
+
+IF (u > 1000.0) OR (u < -1000.0) THEN
+    u := 0.0;
+END_IF;
+
+// ===== 11) Integrador de Vin y salida =====
+Vin := Vin + u * Ts;
+
+IF Vin > 10.0 THEN
+    Vin := 10.0;
+ELSIF Vin < 0.0 THEN
+    Vin := 0.0;
+END_IF;
+
+// Salidas a Factory IO
+FLOAT_OUT_0 := Vin;     // Fill valve
+FLOAT_OUT_1 := 4.0;     // Discharge valve cerrada
